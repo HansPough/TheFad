@@ -71,7 +71,7 @@
 
 {% if editing %}
 <h2>Products on this promo</h2>
-{% if linked %}
+{% if linked|length %}
 <div class="table-wrap"><table class="table">
   <thead><tr><th>Product</th><th class="num">Items</th><th class="num">Normal price</th><th class="num">Promo price</th><th class="actions-head">Actions</th></tr></thead>
   <tbody>{% for p in linked %}

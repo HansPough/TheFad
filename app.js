@@ -79,13 +79,32 @@ function configureViews(app) {
   });
 }
 
-export function createApp() {
+/**
+ * Builds the Express app.
+ *
+ * Everything is optional and defaults to the real system, so `createApp()` is unchanged for the
+ * team. `preview/preview.js` passes the options to run the same shell against sample data:
+ *
+ *   register      replaces backend/index.js (preview registers sample screens instead of the stubs)
+ *   staticOverlay a folder served from /static before the real one (preview overrides one script)
+ *   beforeRoutes  middleware registered after the session and before the routes (demo sign-in)
+ *   approval      the POST approval guard; null turns the PIN check off (preview only)
+ *   health        a replacement for the /health handler, which would otherwise need the database
+ */
+export function createApp({
+  register = registerAll,
+  staticOverlay = null,
+  beforeRoutes = null,
+  approval = undefined,
+  health = null,
+} = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
 
   configureViews(app);
 
+  if (staticOverlay) app.use('/static', express.static(staticOverlay));
   app.use('/static', express.static(path.join(root, 'static'), { maxAge: '7d' }));
   app.use(express.urlencoded({ extended: false, limit: config.maxContentLength }));
   app.use(express.json({ limit: config.maxContentLength }));
@@ -104,6 +123,8 @@ export function createApp() {
   // Per-request context so the database layer can read the session without it being passed around.
   app.use((req, res, next) => storage.run({ req, res, session: req.session }, next));
 
+  if (beforeRoutes) app.use(beforeRoutes);
+
   // Every POST must carry the session's CSRF token.
   app.use((req, res, next) => {
     if (verifyCsrf(req)) return next();
@@ -112,13 +133,13 @@ export function createApp() {
     }, 400);
   });
 
-  app.get('/health', async (req, res) => {
+  app.get('/health', health || (async (req, res) => {
     const ok = await db.ping();
     res.status(ok ? 200 : 503).json({ database: ok ? 'ok' : 'unreachable' });
-  });
+  }));
 
-  const router = makeRouter(app);
-  registerAll(router);
+  const router = makeRouter(app, { approval });
+  register(router);
 
   app.use((req, res) => renderPage(req, res, 'error.html', {
     code: 404, heading: 'Page not found', message: 'Check the address or use the menu.',

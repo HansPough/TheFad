@@ -5,7 +5,7 @@
   <h1>Promos</h1>
   <a class="btn" href="{{ url_for('admin_promos.new') }}">Create promo</a>
 </div>
-{% if rows %}
+{% if rows|length %}
 <div class="table-wrap"><table class="table">
   <thead><tr><th>Promo</th><th class="num">Promo ID</th><th class="num">Discount</th><th>Dates</th><th>Status</th><th class="num">Items</th><th class="actions-head">Actions</th></tr></thead>
   <tbody>{% for r in rows %}

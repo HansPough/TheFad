@@ -12,32 +12,29 @@
   <label class="check">To <input type="date" name="end" value="{{ end.isoformat() }}"></label>
   <button class="btn btn-quiet" type="submit">Show</button>
 </form>
-{% set total = report|selectattr('refund_method', 'equalto', 'TOTAL')|first %}
-{% set methods = report|rejectattr('refund_method', 'equalto', 'TOTAL')|list %}
-{% set count_sum = methods|sum('refund_count') %}
-{% set units_sum = methods|sum('units_refunded') %}
-{% set refunded_sum = methods|sum('total_refunded') %}
-{% set count_total = total.refund_count if total else count_sum %}
-{% set units_total = total.units_refunded if total else units_sum %}
-{% set refunded_total = total.total_refunded if total else refunded_sum %}
+{% set total = none %}
+{% for r in report %}{% if r.refund_method == 'TOTAL' %}{% set total = r %}{% endif %}{% endfor %}
+{% set count_total = total.refund_count if total else report|sum('refund_count') %}
+{% set units_total = total.units_refunded if total else report|sum('units_refunded') %}
+{% set refunded_total = total.total_refunded if total else report|sum('total_refunded') %}
 <div class="stats compact">
   <div class="stat"><span class="stat-num">{{ total.gross_sales|peso if total and total.gross_sales is not none else '—' }}</span><span class="muted">Gross sales in this period</span></div>
   <div class="stat"><span class="stat-num">{{ refunded_total|peso }}</span><span class="muted">Refunded</span></div>
   <div class="stat"><span class="stat-num">{{ total.net_sales|peso if total and total.net_sales is not none else '—' }}</span><span class="muted">Net sales</span></div>
 </div>
-{% if methods %}
+{% if report|length %}
 <div class="table-wrap"><table class="table">
   <thead><tr><th>Method</th><th class="num">Refunds</th><th class="num">Units</th><th class="num">Refunded</th></tr></thead>
-  <tbody>{% for r in methods %}
+  <tbody>{% for r in report %}{% if r.refund_method != 'TOTAL' %}
     <tr><td>{{ r.refund_method }}</td><td class="num">{{ r.refund_count }}</td><td class="num">{{ r.units_refunded }}</td><td class="num">{{ r.total_refunded|peso }}</td></tr>
-  {% endfor %}</tbody>
+  {% endif %}{% endfor %}</tbody>
   <tfoot><tr><td>Total</td><td class="num">{{ count_total }}</td><td class="num">{{ units_total }}</td><td class="num">{{ refunded_total|peso }}</td></tr></tfoot>
 </table></div>
 {% else %}
   <p class="empty">No refunds in this period.</p>
 {% endif %}
 <h2>Refunds in this period</h2>
-{% if refunds %}
+{% if refunds|length %}
 <div class="table-wrap"><table class="table">
   <thead><tr><th>When</th><th class="num">Refund ID</th><th>Order ID</th><th>Item</th><th class="num">Qty</th><th class="num">Amount</th><th>Method</th><th>Reason</th><th>By</th></tr></thead>
   <tbody>{% for r in refunds %}
