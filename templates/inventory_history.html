@@ -1,9 +1,120 @@
 {% extends "base.html" %}
 {% block title %}Stock movements{% endblock %}
 {% block content %}
+<style>
+  .mv-tabs { display: inline-flex; gap: 4px; padding: 4px; margin: 0 0 20px; background: #fff; border: 1px solid #e6e8ec; border-radius: 999px; }
+  .mv-tabs a { padding: 8px 16px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: #3b4050; text-decoration: none; }
+  .mv-tabs a.active { background: #12141a; color: #fff; }
+  .mv-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; margin: 0 0 20px; }
+  .mv-filters label { display: grid; gap: 6px; font-size: 14px; font-weight: 600; }
+  .mv-filters input, .mv-filters select { min-width: 190px; padding: 10px 12px; border: 1px solid #d5d9e0; border-radius: 8px; background: #fff; font: inherit; font-weight: 400; }
+  .mv-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin: 0 0 20px; }
+  .mv-stat { padding: 18px 20px; background: #fff; border: 1px solid #e6e8ec; border-radius: 14px; box-shadow: 0 1px 2px rgba(18,20,26,.05), 0 6px 18px rgba(18,20,26,.06); }
+  .mv-stat small { display: block; font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: #667085; }
+  .mv-stat strong { display: block; margin: 6px 0 2px; font-size: 28px; font-variant-numeric: tabular-nums; }
+  .mv-stat span { font-size: 13px; color: #667085; }
+  .mv-card { background: #fff; border: 1px solid #e6e8ec; border-radius: 14px; box-shadow: 0 1px 2px rgba(18,20,26,.05), 0 6px 18px rgba(18,20,26,.06); overflow-x: auto; }
+  .mv-table { width: 100%; min-width: 1020px; table-layout: fixed; border-collapse: collapse; font-size: 14px; }
+  .mv-table th, .mv-table td { padding: 12px 14px; vertical-align: middle; }
+  .mv-table th { background: #f5f6f8; text-align: left; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #667085; white-space: nowrap; }
+  .mv-table td { border-top: 1px solid #e6e8ec; white-space: nowrap; }
+  .mv-table td:nth-child(3) { font-size: 13px; color: #3b4050; }
+  .mv-table .num { text-align: center; font-variant-numeric: tabular-nums; }
+  .mv-table .muted { color: #667085; }
+  .mv-product { white-space: normal; }
+  .mv-product small { display: block; margin-top: 2px; color: #667085; font-size: 12px; }
+  .mv-badge { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .mv-badge.in { background: #dcf3ea; color: #12805c; }
+  .mv-badge.out { background: #fde8e6; color: #c0362c; }
+  .pos { color: #12805c; font-weight: 600; }
+  .neg { color: #c0362c; font-weight: 600; }
+  .mv-empty { padding: 24px; text-align: center; color: #667085; }
+  .mv-foot { margin: 10px 4px 0; font-size: 13px; color: #667085; }
+</style>
+
 <div class="head">
-  <h1>Stock movements</h1>
-  <a class="btn btn-quiet" href="{{ url_for('inventory.index') }}">Back to inventory</a>
+  <h1>Inventory</h1>
 </div>
-{% include "_movements.html" %}
+
+<nav class="mv-tabs" aria-label="Inventory views">
+  <a href="{{ url_for('inventory.index') }}">Inventory</a>
+  <a href="{{ url_for('inventory.history') }}" class="active">Stock movements</a>
+</nav>
+
+<form method="get" action="{{ url_for('inventory.history') }}" class="mv-filters">
+  <label>Search products
+    <input type="search" name="q" value="{{ q }}" placeholder="Search products">
+  </label>
+  <label>Category
+    <select name="category">
+      <option value="">All categories</option>
+      {% for c in categories %}
+        <option value="{{ c }}" {% if c == category %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Movements
+    <select name="type">
+      {% for t in types %}
+        <option value="{{ t.value }}" {% if t.value == (type or '') %}selected{% endif %}>{{ t.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Date Filter
+    <select name="range">
+      {% for r in ranges %}
+        <option value="{{ r.value }}" {% if r.value == range %}selected{% endif %}>{{ r.label }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit" class="btn">Apply</button>
+  <a class="btn btn-quiet" href="{{ url_for('inventory.history') }}">Clear</a>
+</form>
+
+<div class="mv-stats">
+  <div class="mv-stat"><small>Total deducted (-)</small><strong class="neg">{{ stats.deducted }}</strong><span>Sales &amp; adjustments</span></div>
+  <div class="mv-stat"><small>Total added (+)</small><strong class="pos">+{{ stats.added }}</strong><span>Deliveries &amp; restocks</span></div>
+  <div class="mv-stat"><small>All consumption</small><strong class="neg">{{ stats.consumption }}</strong><span>All categories</span></div>
+  <div class="mv-stat"><small>Net change</small><strong class="{% if stats.net < 0 %}neg{% else %}pos{% endif %}">{% if stats.net > 0 %}+{% endif %}{{ stats.net }}</strong><span>Added minus deducted</span></div>
+</div>
+
+<div class="mv-card">
+  <table class="mv-table">
+    <colgroup>
+      <col style="width: 44px">
+      <col>
+      <col style="width: 190px">
+      <col style="width: 130px">
+      <col style="width: 108px">
+      <col style="width: 84px">
+      <col style="width: 104px">
+      <col style="width: 92px">
+      <col style="width: 116px">
+    </colgroup>
+    <thead>
+      <tr>
+        <th>#</th><th>Product</th><th>Date</th><th>Recorded by</th><th>Source</th>
+        <th class="num">Added</th><th class="num">Deducted</th><th class="num">Balance</th><th>Movements</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="muted">{{ loop.index }}</td>
+        <td class="mv-product">{{ row.name }}{% if row.variant %}<small>{{ row.variant }}</small>{% endif %}</td>
+        <td>{{ row.logged_at | dt }}</td>
+        <td>{{ row.recorded_by }}</td>
+        <td><strong>{{ row.source }}</strong></td>
+        <td class="num">{% if row.added %}<span class="pos">+{{ row.added }}</span>{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td class="num">{% if row.deducted %}<span class="neg">{{ row.deducted }}</span>{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td class="num"><strong>{{ row.balance_after }}</strong></td>
+        <td><span class="mv-badge {{ row.direction }}">{{ row.badge }}</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" class="mv-empty">No changes match these filters.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="mv-foot">Showing {{ shown }} of {{ total }} items</p>
 {% endblock %}
