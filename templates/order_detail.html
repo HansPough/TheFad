@@ -65,11 +65,13 @@
 <section class="panel"><h2>Order actions</h2>
 {% if sale.order_status in ['Pending', 'Out_for_Delivery'] %}
   <p class="muted small">Update delivery details and order status.</p>
+
   {% if sale.order_status == 'Pending' and sale.fulfillment_type == 'Delivery' %}
   <form class="order-update" method="post" action="{{ url_for('orders.set_status', {sale_id: sale.sale_id}) }}">
     <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <input type="hidden" name="new_status" value="Out_for_Delivery">
-    <label for="rider-service">Rider service</label><input id="rider-service" name="rider_service" placeholder="Rider service (e.g. Lalamove)" maxlength="50" required>
+    <label for="driver-name">Driver name</label><input id="driver-name" name="driver_name" placeholder="Driver name" maxlength="50">
+    <label for="rider-service">Rider service</label><input id="rider-service" name="rider_service" placeholder="e.g. Lalamove" maxlength="50" required>
     <label for="rider-contact">Rider contact</label><input id="rider-contact" name="rider_contact" placeholder="Rider contact number" maxlength="20" required>
     <button class="btn" type="submit">Send out for delivery</button>
   </form>

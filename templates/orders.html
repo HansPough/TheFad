@@ -6,8 +6,8 @@
   <a class="btn" href="{{ url_for('pos.index') }}">New sale</a>
 </div>
 <form class="toolbar" method="get">
-  <label class="check">From <input type="date" name="start" value="{{ start.isoformat() }}"></label>
-  <label class="check">To <input type="date" name="end" value="{{ end.isoformat() }}"></label>
+  <label class="check">From <input type="date" name="start" value="{{ start }}"></label>
+  <label class="check">To <input type="date" name="end" value="{{ end }}"></label>
   <select name="status" aria-label="Status">
     <option value="">All statuses</option>
     {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if status == s }}>{{ s|label }}</option>{% endfor %}
