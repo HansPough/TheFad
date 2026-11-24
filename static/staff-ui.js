@@ -41,10 +41,11 @@
     if (table.tFoot) Array.from(table.tFoot.rows).forEach(row => { row.cells[0].colSpan += 1; });
     let page = 1, size = 10;
     const server = table.dataset.pagination === 'server';
+    const teamTable = Boolean(wrap.closest('.team-page'));
     let status, previous, next;
     function render() {
       const count = Math.max(1, Math.ceil(rows.length / size)); page = Math.min(page, count);
-      rows.forEach((row, i) => { row.hidden = !server && (i < (page - 1) * size || i >= page * size); body.append(row); row.cells[0].textContent = offset + i + 1; });
+      rows.forEach((row, i) => { row.hidden = !server && !teamTable && (i < (page - 1) * size || i >= page * size); body.append(row); row.cells[0].textContent = offset + i + 1; });
       if (status) { status.textContent = `${(page - 1) * size + 1}–${Math.min(page * size, rows.length)} of ${rows.length} · Page ${page} of ${count}`; previous.disabled = page === 1; next.disabled = page === count; }
     }
     function sortValue(cell) {
@@ -54,7 +55,7 @@
       return raw;
     }
     headings.forEach((heading, column) => {
-      if (!heading.textContent.trim() || /actions/i.test(heading.textContent)) return;
+      if (teamTable || !heading.textContent.trim() || /actions/i.test(heading.textContent)) return;
       const label = heading.textContent.trim(), button = document.createElement('button'); button.type = 'button'; button.className = 'table-sort'; button.textContent = label + ' ↕';
       button.title = server ? 'Sort events on this page' : `Sort by ${label}`;
       let ascending = false;
@@ -64,7 +65,7 @@
         button.textContent = label + (ascending ? ' ↑' : ' ↓'); page=1; render();
       }); heading.replaceChildren(button);
     });
-    if (!server && rows.length > 10) {
+    if (!server && !teamTable && rows.length > 10) {
       const nav=document.createElement('nav'); nav.className='table-pagination'; nav.setAttribute('aria-label', `Table ${index+1} pages`);
       status=document.createElement('span'); status.setAttribute('role','status');
       const select=document.createElement('select'); select.setAttribute('aria-label','Rows per page'); [10,25,50,100].forEach(n => select.add(new Option(`${n} rows`,n)));

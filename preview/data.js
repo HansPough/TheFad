@@ -11,9 +11,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { nextShift, shiftDefaults } from '../backend/decembrano/attendance-service.js';
 import { LOW_STOCK } from '../config.js';
 import { ROLE_LABELS } from '../menu.js';
-import { addDays, combine, isoDate, shopNow, shopTimestamp, strftime } from '../time.js';
+import { addDays, combine, isoDate, isoweekday, shopNow, shopTimestamp, strftime } from '../time.js';
 import { colorHex, compareSizes, groupProducts } from '../utils.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -449,19 +450,34 @@ const inputDate = (value) => (value ? isoDate(value) : '');
 
 export function attendanceMine() {
   const setting = fixtures.shift_setting || { shift_start: '09:00:00', shift_end: '17:00:00', grace_minutes: 15, shift_hours: 8 };
-  const shiftHours = money(setting.shift_hours) || 8;
-  const today = isoDate(shopNow());
+  const rules = {
+    shift_start: setting.shift_start,
+    shift_end: setting.shift_end,
+    grace: Number(setting.grace_minutes) || 0,
+    shift_hours: money(setting.shift_hours) || 8,
+    work_days: setting.work_days || '1,2,3,4,5,6',
+  };
+  const shiftHours = rules.shift_hours;
+  const now = shopNow();
+  const today = isoDate(now);
+  const shiftStart = combine(now, rules.shift_start);
+  const shiftEnd = combine(now, rules.shift_end);
+  const withinShift = shiftEnd <= shiftStart
+    ? now >= shiftStart || now < shiftEnd
+    : now >= shiftStart && now < shiftEnd;
   const rows = [...state.myAttendance].sort((left, right) => right.time_in - left.time_in);
-  const openRow = rows.find((row) => !row.time_out) || null;
-  const todayDone = rows.some((row) => row.time_out && isoDate(row.time_in) === today);
+  const openRow = rows.find((row) => row.shift_type === 'Regular' && !row.time_out) || null;
+  const todayDone = rows.some((row) => row.shift_type === 'Regular' && row.time_out && isoDate(row.time_in) === today);
 
   let st = null;
   if (openRow) {
-    const worked = Math.max(0, (shopNow() - openRow.time_in) / 3600000);
+    const scheduledEnd = combine(openRow.time_in, rules.shift_end);
+    const opensAt = openRow.scheduled_end || (scheduledEnd <= openRow.time_in ? addDays(scheduledEnd, 1) : scheduledEnd);
+    const worked = Math.max(0, (Math.min(now, opensAt) - openRow.time_in) / 3600000);
     st = {
       worked,
       pct: Math.min(100, Math.round((worked / shiftHours) * 100)),
-      opens_at: new Date(openRow.time_in.getTime() + shiftHours * 3600000),
+      opens_at: opensAt,
     };
   }
 
@@ -471,10 +487,9 @@ export function attendanceMine() {
     const start = combine(permitRow.work_date, permitRow.start_time);
     const finish = combine(permitRow.work_date, permitRow.end_time);
     const graceUntil = new Date(start.getTime() + (Number(permitRow.grace_minutes) || 0) * 60000);
-    const now = shopNow();
     let stage = 'ready';
-    if (permitRow.time_in && !permitRow.time_out) stage = 'open';
-    else if (permitRow.time_out) stage = 'done';
+    if ((permitRow.time_in && !permitRow.time_out) || permitRow.status === 'In progress') stage = 'open';
+    else if (permitRow.time_out || permitRow.status === 'Done') stage = 'done';
     else if (now > finish) stage = 'over';
     else if (now < start) stage = 'early';
     else if (openRow) stage = 'wait';
@@ -488,7 +503,10 @@ export function attendanceMine() {
     st,
     shift: shiftHours,
     today_done: todayDone,
-    can_clock_in: !openRow && !todayDone,
+    can_clock_in: !openRow && !todayDone
+      && String(rules.work_days).split(',').map(Number).includes(isoweekday(now))
+      && withinShift,
+    next_shift: nextShift(now, rules, todayDone),
     ot,
     permit: permitRow,
     upcoming: (fixtures.my_overtime || [])
@@ -501,12 +519,14 @@ export function clockIn(user) {
   const now = shopNow();
   const setting = fixtures.shift_setting || {};
   const start = combine(now, setting.shift_start || '09:00:00');
+  const scheduledEnd = combine(now, setting.shift_end || '17:00:00');
   state.myAttendance.unshift({
     dtr_id: Math.max(9000, ...state.myAttendance.map((row) => Number(row.dtr_id) || 0)) + 1,
     user_id: user.user_id,
     shift_type: 'Regular',
     time_in: now,
     time_out: null,
+    scheduled_end: scheduledEnd <= now ? addDays(scheduledEnd, 1) : scheduledEnd,
     total_hours: null,
     overtime_hours: 0,
     status: now > start ? 'Late' : 'Present',
@@ -514,12 +534,26 @@ export function clockIn(user) {
   });
 }
 
-export function clockOut() {
-  const openRow = state.myAttendance.find((row) => !row.time_out);
-  if (!openRow) return false;
-  openRow.time_out = shopNow();
-  openRow.total_hours = Math.round(((openRow.time_out - openRow.time_in) / 3600000) * 100) / 100;
-  return true;
+export function clockOut(shiftType = 'Regular') {
+  const now = shopNow();
+  let closed = false;
+  for (const row of state.myAttendance) {
+    if (row.shift_type !== shiftType || row.time_out) continue;
+    let scheduledEnd = row.scheduled_end;
+    if (!scheduledEnd) {
+      scheduledEnd = combine(row.time_in, shiftType === 'Overtime'
+        ? '23:59'
+        : fixtures.shift_setting?.shift_end || '17:00:00');
+      if (shiftType === 'Regular' && scheduledEnd <= row.time_in) scheduledEnd = addDays(scheduledEnd, 1);
+    }
+    if (scheduledEnd <= now) {
+      row.time_out = scheduledEnd;
+      row.total_hours = Math.round(((scheduledEnd - row.time_in) / 3600000) * 100) / 100;
+      row.note = [row.note, 'Automatically closed at scheduled end'].filter(Boolean).join('; ');
+      closed = true;
+    }
+  }
+  return closed;
 }
 
 export function attendanceEveryone(query = {}) {
@@ -539,19 +573,21 @@ export function attendanceEveryone(query = {}) {
     else if (row.status === 'Late') counts.Late += 1;
     else if (row.status === 'Absent' || row.status === 'Not in yet') counts.Absent += 1;
   }
-  const hours = rows.reduce((sum, row) => sum + money(row.total_hours), 0);
+  const hours = rows
+    .filter((row) => row.shift_type === 'Regular')
+    .reduce((sum, row) => sum + money(row.total_hours), 0);
   const overtime = rows.reduce((sum, row) => sum + money(row.overtime_hours), 0);
   const today = shopNow();
   return {
     tab: 'everyone',
     start,
     end,
-    staff: state.staff,
+    staff: state.staff.filter((person) => person.is_active !== false),
     user_id: userId || '',
     presets: [
       ['Today', today, today],
-      ['Last 7 days', addDays(today, -7), today],
-      ['Last 30 days', addDays(today, -30), today],
+      ['Last 7 days', addDays(today, -6), today],
+      ['Last 30 days', addDays(today, -29), today],
     ],
     counts,
     hours,
@@ -564,25 +600,38 @@ export function overtimePage(query = {}) {
   const { start, end } = range(query);
   const from = start.getTime();
   const to = addDays(end, 1).getTime();
+  const userId = query.user_id ? Number(query.user_id) : null;
   return {
     tab: 'overtime',
     start,
     end,
+    staff: state.staff.filter((person) => person.is_active !== false),
+    user_id: userId || '',
     rows: state.overtime
       .filter((row) => row.work_date instanceof Date && row.work_date.getTime() >= from && row.work_date.getTime() < to)
+      .filter((row) => !userId || Number(row.user_id) === userId)
       .sort((left, right) => right.work_date - left.work_date),
   };
 }
 
 export function shiftFormPage(dtrId) {
   const record = dtrId ? fixtures.shifts?.[String(dtrId)] : null;
+  const setting = fixtures.shift_setting || {};
+  const defaults = shiftDefaults({
+    shift_start: setting.shift_start || '09:00:00',
+    shift_end: setting.shift_end || '17:00:00',
+    grace: Number(setting.grace_minutes) || 0,
+    shift_hours: Number(setting.shift_hours) || 8,
+    work_days: setting.work_days || '1,2,3,4,5,6',
+  });
   return {
-    staff: state.staff,
+    staff: state.staff.filter((person) => person.is_active !== false),
+    max_time: shopTimestamp(shopNow()).slice(0, 16),
     shift: record ? {
       ...record,
       time_in: shiftInput(record.time_in),
       time_out: shiftInput(record.time_out),
-    } : { dtr_id: null, user_id: '', time_in: '', time_out: '', note: '' },
+    } : defaults,
   };
 }
 
@@ -594,6 +643,7 @@ export function overtimeFormPage(permitId) {
     default_grace: Number(fixtures.shift_setting?.grace_minutes) || 15,
     permit: record ? {
       ...record,
+      started: Boolean(record.time_in),
       work_date: inputDate(record.work_date),
       start_time: hhmm(record.start_time),
       end_time: hhmm(record.end_time),

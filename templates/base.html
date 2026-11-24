@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" href="{{ url_for('static', {filename: 'favicon.png'}) }}">
-  <link rel="stylesheet" href="{{ url_for('static', {filename: 'style.css'}) }}">
+  <link rel="stylesheet" href="{{ url_for('static', {filename: 'style.css'}) }}?v=20261124">
 </head>
 {% set staff_layout = current_user and not public_page %}
 <body data-role="{{ current_user.role if current_user else '' }}" class="{{ 'staff' if staff_layout else 'public' }}">
@@ -110,6 +110,6 @@
 <script src="{{ url_for('static', {filename: 'shop.js'}) }}" defer></script>
 <script src="{{ url_for('static', {filename: 'approval.js'}) }}" defer></script>
 <script src="{{ url_for('static', {filename: 'modal.js'}) }}" defer></script>
-{% if staff_layout %}<script src="{{ url_for('static', {filename: 'staff-ui.js'}) }}" defer></script>{% endif %}
+{% if staff_layout %}<script src="{{ url_for('static', {filename: 'staff-ui.js'}) }}?v=20261124" defer></script>{% endif %}
 </body>
 </html>

@@ -1,55 +1,67 @@
 {% extends "base.html" %}
 {% block title %}{{ 'Edit staff' if editing else 'Add staff' }}{% endblock %}
 {% block content %}
-<div class="head">
-  <h1>{{ 'Edit staff' if editing else 'Add staff' }}{% if editing %} <span class="muted small id-cell">User #{{ user_id }}</span>{% endif %}</h1>
-  <a class="btn btn-quiet" href="{{ url_for('admin_staff.index') }}">Back</a>
+<div class="team-page">
+  <div class="head">
+    <div>
+      <p class="eyebrow">Staff</p>
+      <h1>{{ 'Edit staff' if editing else 'Add staff' }}</h1>
+    </div>
+  </div>
+  <form class="form team-form staff-form" method="post"
+        action="{{ url_for('admin_staff.edit', {user_id: user_id}) if editing else url_for('admin_staff.new') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <div class="staff-fields{{ ' editing' if editing }}">
+      <div class="field">
+        <label for="username">Username</label>
+        <input id="username" name="username" value="{{ person.username or '' }}" {{ 'readonly' if editing else 'required' }} autocomplete="off" placeholder="e.g. maria.santos">
+      </div>
+      <div class="field">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" value="{{ person.email or '' }}" required placeholder="name@example.com">
+      </div>
+      <div class="field">
+        <label for="first_name">First name</label>
+        <input id="first_name" name="first_name" value="{{ person.first_name or '' }}" maxlength="50" required placeholder="First name">
+      </div>
+      <div class="field">
+        <label for="last_name">Last name</label>
+        <input id="last_name" name="last_name" value="{{ person.last_name or '' }}" maxlength="50" required placeholder="Last name">
+      </div>
+      <div class="field">
+        <label for="user_type">Role</label>
+        <select id="user_type" name="user_type" required>
+          <option value="" disabled {{ 'selected' if not person.user_type }}>Select role</option>
+          <option value="CA" {{ 'selected' if person.user_type == 'CA' }}>Cashier</option>
+          <option value="AD" {{ 'selected' if person.user_type == 'AD' }}>Manager</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="station">Station <span class="muted small">(optional)</span></label>
+        <select id="station" name="station">
+          <option value="">Select station</option>
+          <option value="Counter 1" {{ 'selected' if person.station == 'Counter 1' }}>Counter1</option>
+          <option value="Counter 2" {{ 'selected' if person.station == 'Counter 2' }}>Counter2</option>
+          {% if person.station and person.station not in ['Counter 1', 'Counter 2'] %}
+          <option value="{{ person.station }}" selected>{{ person.station }}</option>
+          {% endif %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="hired_on">Start date</label>
+        <input id="hired_on" name="hired_on" type="date" value="{{ person.hired_on.isoformat() if person.hired_on and person.hired_on.isoformat else (person.hired_on or '') }}" placeholder="Select date">
+      </div>
+      {% if not editing %}
+      <div class="field">
+        <label for="password">Temporary password</label>
+        <input id="password" name="password" type="password" minlength="8" autocomplete="new-password" placeholder="Temporary password" required>
+      </div>
+      {% endif %}
+    </div>
+    <div class="form-actions">
+      <button class="btn" type="submit">{{ 'Save changes' if editing else 'Add staff' }}</button>
+      <a class="btn btn-quiet" href="{{ url_for('admin_staff.index') }}">Cancel</a>
+    </div>
+  </form>
 </div>
-<form class="form wide" method="post"
-      action="{{ url_for('admin_staff.edit', {user_id: user_id}) if editing else url_for('admin_staff.new') }}">
-  <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-  <div class="field-grid">
-    <div class="field">
-      <label for="username">Username</label>
-      <input id="username" name="username" value="{{ person.username or '' }}" {{ 'readonly' if editing else 'required' }} autocomplete="off">
-    </div>
-    <div class="field">
-      <label for="email">Email</label>
-      <input id="email" name="email" type="email" value="{{ person.email or '' }}" required>
-    </div>
-    <div class="field">
-      <label for="first_name">First name</label>
-      <input id="first_name" name="first_name" value="{{ person.first_name or '' }}" maxlength="50" required>
-    </div>
-    <div class="field">
-      <label for="last_name">Last name</label>
-      <input id="last_name" name="last_name" value="{{ person.last_name or '' }}" maxlength="50" required>
-    </div>
-    <div class="field">
-      <label for="user_type">Role</label>
-      <select id="user_type" name="user_type">
-        <option value="CA" {{ 'selected' if person.user_type == 'CA' }}>Cashier</option>
-        <option value="AD" {{ 'selected' if person.user_type == 'AD' }}>Admin</option>
-      </select>
-    </div>
-    <div class="field">
-      <label for="station">Station <span class="muted small">(optional)</span></label>
-      <input id="station" name="station" value="{{ person.station or '' }}" maxlength="50" placeholder="Counter 1">
-    </div>
-    <div class="field">
-      <label for="hired_on">Start date</label>
-      <input id="hired_on" name="hired_on" type="date" value="{{ person.hired_on.isoformat() if person.hired_on and person.hired_on.isoformat else (person.hired_on or '') }}">
-    </div>
-    {% if not editing %}
-    <div class="field">
-      <label for="password">Temporary password</label>
-      <input id="password" name="password" type="password" minlength="8" autocomplete="new-password" placeholder="8 or more characters" required>
-    </div>
-    {% endif %}
-  </div>
-  <div class="form-actions">
-    <button class="btn" type="submit">{{ 'Save changes' if editing else 'Create account' }}</button>
-    <a class="btn btn-quiet" href="{{ url_for('admin_staff.index') }}">Cancel</a>
-  </div>
-</form>
 {% endblock %}
