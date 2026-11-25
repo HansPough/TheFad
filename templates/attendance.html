@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Attendance{% endblock %}
 {% block content %}
+<div class="team-page attendance-personal">
 <div class="head"><h1>Attendance</h1></div>
 {% include "_attendance_tabs.html" %}
 
@@ -11,11 +12,17 @@
     <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ st.pct }}"><span style="width: {{ st.pct }}%"></span></div>
     <p class="muted">{{ '%.1f'|format(st.worked) }} of {{ shift|int }} hours &middot; automatically closes at {{ st.opens_at.strftime('%I:%M %p') }}</p>
   </div>
-
+  <form method="post" action="{{ url_for('attendance.clock_out') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <button class="btn" type="submit">Clock out</button>
+  </form>
 </section>
 {% else %}
 <section class="status-card">
-  <div><strong>{{ 'Shift done for today' if today_done else 'Off shift' }}</strong></div>
+  <div>
+    <strong>{{ 'Shift done for today' if today_done else 'Off shift' }}</strong>
+    {% if next_shift %}<p class="muted">Next shift: {{ next_shift.label }} &middot; {{ next_shift.start.strftime('%I:%M %p') }} &ndash; {{ next_shift.end.strftime('%I:%M %p') }}</p>{% endif %}
+  </div>
   <form method="post" action="{{ url_for('attendance.clock_in') }}">
     <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <button class="btn" type="submit" {{ 'disabled' if not can_clock_in }}>Clock in</button>
@@ -38,6 +45,10 @@
     </p>
   </div>
   {% if ot.state == 'open' %}
+  <form method="post" action="{{ url_for('attendance.overtime_out') }}">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+    <button class="btn" type="submit">End overtime</button>
+  </form>
   <p class="muted small">Automatically closes at the approved end.</p>
   {% elif ot.state in ['early', 'wait', 'ready'] %}
   <form method="post" action="{{ url_for('attendance.overtime_in') }}">
@@ -70,4 +81,5 @@
   </tbody>
 </table></div>
 {% else %}<p class="empty">No shifts yet.</p>{% endif %}
+</div>
 {% endblock %}

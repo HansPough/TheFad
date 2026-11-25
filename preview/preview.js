@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { createApp } from '../app.js';
 import { flash } from '../flash.js';
 import { renderPage } from '../render.js';
-import { addDays, isoDate, isoTime, shopNow, startOfShopDay } from '../time.js';
+import { addDays, combine, isoDate, isoTime, shopNow, startOfShopDay } from '../time.js';
 import * as data from './data.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -166,13 +166,21 @@ function seedDemoData() {
   const now = shopNow();
 
   if (admin && !(data.fixtures.overtime || []).length) {
+    const dayStart = startOfShopDay(now).getTime();
+    const dayEnd = new Date(`${isoDate(now)}T23:59:00+08:00`).getTime();
+    const start = new Date(Math.max(dayStart, now.getTime() - 60 * 60000));
+    const end = new Date(Math.min(dayEnd, now.getTime() + 180 * 60000));
+    if (end <= start) {
+      start.setTime(dayEnd - 60 * 60000);
+      end.setTime(dayEnd);
+    }
     const permit = {
       permit_id: nextId(data.state.overtime, 'permit_id'),
       user_id: admin.user_id,
       full_name: fullName(admin),
       work_date: now,
-      start_time: isoTime(new Date(now.getTime() - 60 * 60000)),
-      end_time: isoTime(new Date(now.getTime() + 180 * 60000)),
+      start_time: isoTime(start),
+      end_time: isoTime(end),
       grace_minutes: 15,
       note: 'Closing count (demo overtime)',
       status: 'Allowed',
@@ -414,8 +422,10 @@ function register(router) {
 
   router.post('/attendance/clock-in', 'attendance.clock_in', signedIn, (req, res) => {
     const before = data.attendanceMine();
-    if (before.open_row || before.today_done) {
-      flash(req, 'info', before.open_row ? 'You are already on shift.' : 'Your shift is already finished for today.');
+    if (!before.can_clock_in) {
+      flash(req, 'info', before.open_row ? 'You are already on shift.'
+        : before.today_done ? 'Your shift is already finished for today.'
+          : 'Clock in is available during the scheduled shift only.');
       return res.redirect('/attendance/');
     }
     data.clockIn(currentPerson(req));
@@ -424,39 +434,78 @@ function register(router) {
   });
 
   router.post('/attendance/clock-out', 'attendance.clock_out', signedIn, (req, res) => {
-    const closed = data.clockOut();
-    flash(req, closed ? 'success' : 'info', closed ? 'Clocked out.' : 'There is no open shift.');
+    const closed = data.clockOut('Regular');
+    flash(req, closed ? 'success' : 'info', closed
+      ? 'Shift closed at its scheduled end.'
+      : 'Your shift closes automatically at the scheduled end. Ask an admin for corrections.');
     return res.redirect('/attendance/');
   });
 
   router.post('/attendance/overtime-in', 'attendance.overtime_in', signedIn, (req, res) => {
     syncMyOvertime(req);
-    const permit = (data.fixtures.my_overtime || [])[0];
+    const today = isoDate(shopNow());
+    const permit = (data.fixtures.my_overtime || []).find((row) => isoDate(row.work_date) === today);
     if (!permit) {
       flash(req, 'error', 'No approved overtime for today.');
       return res.redirect('/attendance/');
     }
-    if (!permit.time_in) permit.time_in = shopNow();
+    const now = shopNow();
+    const start = combine(permit.work_date, permit.start_time);
+    const end = combine(permit.work_date, permit.end_time);
+    if (permit.time_out || permit.status === 'Completed' || permit.status === 'Done' || now >= end) {
+      flash(req, 'info', 'This overtime has already ended.');
+      return res.redirect('/attendance/');
+    }
+    if (permit.time_in || permit.status === 'In progress') {
+      flash(req, 'info', 'Overtime is already in progress.');
+      return res.redirect('/attendance/');
+    }
+    if (now < start || permit.status !== 'Allowed') {
+      flash(req, 'info', 'This overtime is not open for clock-in yet.');
+      return res.redirect('/attendance/');
+    }
+    permit.time_in = now;
+    permit.scheduled_end = end;
     permit.status = 'In progress';
+    data.state.myAttendance.unshift({
+      dtr_id: Math.max(9000, ...data.state.myAttendance.map((row) => Number(row.dtr_id) || 0)) + 1,
+      user_id: permit.user_id,
+      shift_type: 'Overtime',
+      time_in: now,
+      time_out: null,
+      scheduled_end: end,
+      total_hours: null,
+      overtime_hours: null,
+      status: 'Present',
+      note: permit.note,
+    });
     const mirror = data.state.overtime.find((row) => row.permit_id === permit.permit_id);
-    if (mirror) Object.assign(mirror, { time_in: permit.time_in, status: permit.status });
+    if (mirror) Object.assign(mirror, { time_in: permit.time_in, scheduled_end: permit.scheduled_end, status: permit.status });
     flash(req, 'success', 'Overtime started.');
     return res.redirect('/attendance/');
   });
 
   router.post('/attendance/overtime-out', 'attendance.overtime_out', signedIn, (req, res) => {
-    syncMyOvertime(req);
-    const permit = (data.fixtures.my_overtime || [])[0];
-    if (!permit || !permit.time_in) {
-      flash(req, 'error', 'Overtime has not started.');
-      return res.redirect('/attendance/');
+    const now = shopNow();
+    const open = data.state.myAttendance.find((row) => row.shift_type === 'Overtime'
+      && !row.time_out && isoDate(row.time_in) === isoDate(now));
+    const closed = Boolean(open && data.clockOut('Overtime') && open.time_out);
+    if (closed) {
+      syncMyOvertime(req);
+      const permit = (data.fixtures.my_overtime || []).find((row) => row.time_in?.getTime() === open.time_in.getTime());
+      if (permit) {
+        Object.assign(permit, {
+          time_out: open.time_out,
+          hours_worked: open.total_hours,
+          status: 'Done',
+        });
+        const mirror = data.state.overtime.find((row) => row.permit_id === permit.permit_id);
+        if (mirror) Object.assign(mirror, { time_out: open.time_out, hours_worked: open.total_hours, status: permit.status });
+      }
     }
-    permit.time_out = shopNow();
-    permit.hours_worked = Math.round(((permit.time_out - permit.time_in) / 3600000) * 100) / 100;
-    permit.status = 'Done';
-    const mirror = data.state.overtime.find((row) => row.permit_id === permit.permit_id);
-    if (mirror) Object.assign(mirror, { time_out: permit.time_out, hours_worked: permit.hours_worked, status: permit.status });
-    flash(req, 'success', 'Overtime ended.');
+    flash(req, closed ? 'success' : 'info', closed
+      ? 'Overtime closed at its approved end.'
+      : 'Overtime closes automatically at its approved end.');
     return res.redirect('/attendance/');
   });
 
@@ -465,6 +514,12 @@ function register(router) {
   router.get('/attendance/shift', 'attendance.new_shift', adminOnly, (req, res) => {
     const locals = data.shiftFormPage(null);
     if (req.query.user_id) locals.shift.user_id = Number(req.query.user_id);
+    if (req.query.date) {
+      const date = String(req.query.date).slice(0, 10);
+      const setting = data.fixtures.shift_setting || {};
+      locals.shift.time_in = `${date}T${String(setting.shift_start || '09:00:00').slice(0, 5)}`;
+      locals.shift.time_out = `${date}T${String(setting.shift_end || '17:00:00').slice(0, 5)}`;
+    }
     return renderPage(req, res, 'shift_form.html', locals);
   });
 
@@ -524,17 +579,39 @@ function register(router) {
   });
 
   const saveOvertime = (req, permitId) => {
-    const person = personById(req.body.user_id);
-    if (!person || !req.body.work_date || !req.body.start_time || !req.body.end_time) return null;
     const existing = permitId ? data.fixtures.permits[String(permitId)] : null;
+    if (permitId && (!existing || !['Allowed', 'In progress'].includes(existing.status))) return null;
+    const person = existing ? personById(existing.user_id) : personById(req.body.user_id);
+    const workDate = existing?.work_date || new Date(`${String(req.body.work_date || '').slice(0, 10)}T00:00:00+08:00`);
+    if (!person || !workDate || Number.isNaN(workDate.getTime())
+      || !req.body.start_time || !req.body.end_time) return null;
+    const startTime = String(req.body.start_time);
+    const endTime = String(req.body.end_time);
+    const startMinutes = Number(startTime.slice(0, 2)) * 60 + Number(startTime.slice(3, 5));
+    const endMinutes = Number(endTime.slice(0, 2)) * 60 + Number(endTime.slice(3, 5));
+    if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes)
+      || startTime.length < 5 || endTime.length < 5
+      || endMinutes <= startMinutes || endMinutes - startMinutes > 480) return null;
+    if (!existing && workDate < startOfShopDay(shopNow())) return null;
+    if (existing?.time_in) {
+      const existingEnd = combine(existing.work_date, existing.end_time);
+      const requestedEnd = combine(existing.work_date, endTime);
+      if (existing.time_out || existingEnd <= shopNow()
+        || startTime.slice(0, 5) !== String(existing.start_time).slice(0, 5)
+        || requestedEnd.getTime() <= existingEnd.getTime()
+        || String(req.body.note || '').trim().length < 3) return null;
+    }
     const record = {
       ...(existing || {}),
       permit_id: permitId ? Number(permitId) : nextId(data.fixtures.overtime, 'permit_id'),
       user_id: person.user_id,
       full_name: fullName(person),
-      work_date: new Date(`${String(req.body.work_date).slice(0, 10)}T00:00:00+08:00`),
-      start_time: String(req.body.start_time),
-      end_time: String(req.body.end_time),
+      work_date: new Date(`${isoDate(workDate)}T00:00:00+08:00`),
+      start_time: existing?.time_in ? existing.start_time : startTime,
+      end_time: endTime,
+      scheduled_end: existing?.time_in && !existing.time_out
+        ? combine(existing.work_date, endTime)
+        : existing?.scheduled_end || null,
       grace_minutes: Number(req.body.grace_minutes) || 0,
       note: String(req.body.note || '') || null,
       status: existing?.status && existing.status !== 'Allowed' ? existing.status : 'Allowed',
@@ -570,6 +647,14 @@ function register(router) {
 
   router.post('/attendance/overtime/:permit_id(\\d+)/cancel', 'attendance.cancel_overtime', adminOnly, (req, res) => {
     const id = Number(req.params.permit_id);
+    const existing = data.fixtures.permits[String(id)];
+    if (!existing) return missing(req, res, 'Overtime not found.', '/attendance/overtime');
+    if (existing.time_in || existing.status !== 'Allowed') {
+      flash(req, 'error', existing.time_in
+        ? 'This overtime has already started, so it cannot be cancelled.'
+        : 'Only scheduled overtime can be cancelled.');
+      return res.redirect('/attendance/overtime');
+    }
     data.fixtures.overtime = data.fixtures.overtime.filter((row) => row.permit_id !== id);
     data.state.overtime = data.state.overtime.filter((row) => row.permit_id !== id);
     delete data.fixtures.permits[String(id)];
@@ -580,10 +665,15 @@ function register(router) {
   router.get('/attendance/schedule', 'attendance.schedule', adminOnly, (req, res) => renderPage(req, res, 'schedule.html', data.schedulePage()));
 
   router.post('/attendance/schedule', 'attendance.schedule', adminOnly, (req, res) => {
+    const shiftStart = String(req.body.shift_start || '09:00').slice(0, 5);
+    const shiftEnd = String(req.body.shift_end || '17:00').slice(0, 5);
+    const minutes = (value) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
+    const duration = ((minutes(shiftEnd) - minutes(shiftStart)) + 1440) % 1440 / 60;
     data.fixtures.shift_setting = {
       ...(data.fixtures.shift_setting || {}),
-      shift_start: `${String(req.body.shift_start || '09:00').slice(0, 5)}:00`,
-      shift_end: `${String(req.body.shift_end || '17:00').slice(0, 5)}:00`,
+      shift_start: `${shiftStart}:00`,
+      shift_end: `${shiftEnd}:00`,
+      shift_hours: duration,
       grace_minutes: Number(req.body.grace_minutes) || 0,
     };
     flash(req, 'success', 'Schedule saved (preview only).');

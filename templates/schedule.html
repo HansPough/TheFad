@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Schedule{% endblock %}
 {% block content %}
+<div class="team-page">
 <div class="head"><h1>Attendance</h1></div>
 {% include "_attendance_tabs.html" %}
-<form class="form" method="post" action="{{ url_for('attendance.schedule') }}">
+<form class="form team-form schedule-form" method="post" action="{{ url_for('attendance.schedule') }}">
   <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
   <h2 class="flush">Regular shift</h2>
   <div class="two">
@@ -14,4 +15,5 @@
   <input id="grace_minutes" name="grace_minutes" type="number" min="0" max="120" value="{{ s.grace_minutes }}" class="narrow" required>
   <div class="form-actions"><button class="btn" type="submit">Save schedule</button></div>
 </form>
+</div>
 {% endblock %}
